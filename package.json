@@ -1,0 +1,13 @@
+{
+    "name": "algo-x",
+    "version": "1.0.0",
+    "description": "X Algorithm Simulator with Grok",
+    "scripts": {
+        "dev": "concurrently \"cd frontend && npm run dev\" \"powershell -File start-backend.ps1\"",
+        "build": "cd frontend && npm run build",
+        "start": "cd frontend && npm start"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}
