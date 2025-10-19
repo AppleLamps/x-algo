@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Dict, Any
 import os
 import logging
 import time
@@ -85,9 +86,19 @@ app.add_middleware(
 class AnalyzeRequest(BaseModel):
     username: str
 
+class TopicWithWeight(BaseModel):
+    topic: str
+    weight: float
+
 class AnalyzeResponse(BaseModel):
-    topics: list[str]
-    recommendations: str
+    topics: List[TopicWithWeight]
+    recommendations: Dict[str, Any]  # Contains 'report' and 'tokens'
+
+class InsightsRequest(BaseModel):
+    username: str
+
+class InsightsResponse(BaseModel):
+    insights: List[str]
 
 @app.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(verify_api_key), Depends(check_rate_limit)])
 async def analyze_user(request: AnalyzeRequest):
@@ -104,8 +115,8 @@ async def analyze_user(request: AnalyzeRequest):
 
     Returns:
         AnalyzeResponse: Response containing:
-            - topics: List of extracted interest topics
-            - recommendations: Personalized content recommendations
+            - topics: List of extracted interest topics with weights
+            - recommendations: Personalized content recommendations with report and token usage
 
     Raises:
         HTTPException: 
@@ -117,26 +128,63 @@ async def analyze_user(request: AnalyzeRequest):
     Example:
         >>> response = await analyze_user(AnalyzeRequest(username="elonmusk"))
         >>> print(response.topics)
-        ['AI', 'Technology', 'Space']
+        [{'topic': 'AI', 'weight': 0.8}, {'topic': 'Technology', 'weight': 0.6}, {'topic': 'Space', 'weight': 0.4}]
     """
     username = request.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="Username cannot be empty")
 
     try:
-        # Gather context from X
+        # Gather context from X (with date filtering and media understanding)
         context = await xai_service.gather_user_context(username)
 
-        # Analyze context to extract topics
-        topics = await xai_service.analyze_context(context)
+        # Analyze context to extract topics with weights (structured output)
+        topics_with_weights = await xai_service.analyze_context(context)
 
-        # Generate recommendations using grok-code-fast-1
-        recommendations = await xai_service.generate_recommendations(topics, context)
+        # Generate recommendations using grok-4-fast-reasoning (structured output with tokens)
+        recommendations_response = await xai_service.generate_recommendations(topics_with_weights, context)
 
-        return AnalyzeResponse(topics=topics, recommendations=recommendations)
+        # Convert topics to response format
+        topics_response = [TopicWithWeight(topic=t["topic"], weight=t["weight"]) for t in topics_with_weights]
+
+        return AnalyzeResponse(topics=topics_response, recommendations=recommendations_response)
     except Exception as e:
         logger.error(f"Error analyzing user {username}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.post("/insights", response_model=InsightsResponse, dependencies=[Depends(verify_api_key), Depends(check_rate_limit)])
+async def get_insights(request: InsightsRequest):
+    """
+    Generate quick insights about a user's account.
+    
+    This endpoint is designed to be called while the main /analyze endpoint is running.
+    It returns 8-12 quick observations that can be displayed and rotated every 4 seconds.
+    Uses grok-3 for fast generation.
+    
+    Args:
+        request (InsightsRequest): Request object containing the username
+        
+    Returns:
+        InsightsResponse: List of quick insights about the user
+        
+    Raises:
+        HTTPException: 400 if username is invalid, 500 if generation fails
+    """
+    username = request.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+    
+    try:
+        # Gather context (will use cache if available from /analyze call)
+        context = await xai_service.gather_user_context(username)
+        
+        # Generate quick insights with grok-3
+        insights = await xai_service.generate_quick_insights(username, context)
+        
+        return InsightsResponse(insights=insights)
+    except Exception as e:
+        logger.error(f"Error generating insights for {username}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Insight generation failed: {str(e)}")
 
 @app.get("/")
 async def root():

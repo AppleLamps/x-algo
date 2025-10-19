@@ -18,7 +18,7 @@ const STYLES = {
   cardDescription: "text-xl text-gray-600 leading-relaxed",
   input: "flex-1 h-16 text-xl border-2 border-gray-300 rounded-2xl transition-all duration-300 focus:border-black focus:ring-4 focus:ring-gray-200/50 focus:shadow-xl bg-gray-50",
   inputError: "border-red-500 focus:border-red-500 focus:ring-red-200",
-  button: "w-full h-16 text-xl font-bold bg-black hover:bg-gray-800 text-white shadow-2xl hover:shadow-3xl transform hover:scale-[1.02] transition-all duration-300 rounded-2xl",
+  button: "w-full min-h-16 py-4 text-xl font-bold bg-black hover:bg-gray-800 text-white shadow-2xl hover:shadow-3xl transform hover:scale-[1.02] transition-all duration-300 rounded-2xl",
   errorCard: "mb-16 border border-red-300 bg-red-50 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500",
   resultsCard: "shadow-2xl border border-gray-200 bg-white hover:shadow-3xl transition-all duration-500",
   badge: "px-6 py-4 text-lg font-bold bg-gray-100 text-black border border-gray-300 hover:shadow-xl hover:scale-105 transition-all duration-300 rounded-full",
@@ -26,9 +26,48 @@ const STYLES = {
   recommendationsText: "text-black whitespace-pre-wrap leading-relaxed text-2xl font-medium",
 } as const;
 
+interface TopicWithWeight {
+  topic: string;
+  weight: number;
+}
+
+interface Signal {
+  name: string;
+  adjustment: string;
+  reason: string;
+}
+
+interface FeedComposition {
+  increase: string[];
+  decrease: string[];
+  account_distribution: string;
+}
+
+interface QualityMetrics {
+  prioritized_signals: string[];
+  spam_filters: string[];
+  diversity_mechanisms: string[];
+}
+
+interface AlgorithmReport {
+  analysis_process: string;
+  signals_boosted: Signal[];
+  signals_reduced: Signal[];
+  feed_composition: FeedComposition;
+  quality_metrics: QualityMetrics;
+  expected_outcome: string;
+}
+
 interface AnalyzeResponse {
-  topics: string[];
-  recommendations: string;
+  topics: TopicWithWeight[];
+  recommendations: {
+    report: AlgorithmReport;
+    tokens: {
+      completion_tokens: number;
+      reasoning_tokens: number;
+      total_tokens: number;
+    };
+  };
 }
 
 export default function Home() {
@@ -38,6 +77,8 @@ export default function Home() {
   const [results, setResults] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState("");
   const [inputError, setInputError] = useState("");
+  const [insights, setInsights] = useState<string[]>([]);
+  const [currentInsightIndex, setCurrentInsightIndex] = useState(0);
 
   // Debounce username input
   useEffect(() => {
@@ -47,6 +88,17 @@ export default function Home() {
 
     return () => clearTimeout(timer);
   }, [username]);
+
+  // Rotate insights every 4 seconds while loading
+  useEffect(() => {
+    if (!loading || insights.length === 0) return;
+
+    const interval = setInterval(() => {
+      setCurrentInsightIndex((prev) => (prev + 1) % insights.length);
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [loading, insights.length]);
 
   const validateUsername = (value: string): string => {
     if (!value.trim()) return "Username is required";
@@ -72,17 +124,36 @@ export default function Home() {
     setLoading(true);
     setError("");
     setResults(null);
+    setInsights([]);
+    setCurrentInsightIndex(0);
 
     try {
-      const response = await fetch("http://localhost:8000/analyze", {
+      const trimmedUsername = debouncedUsername.trim();
+      const apiKey = "algo-x-demo-key-2025";
+      const headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      };
+
+      // Start both requests in parallel
+      const insightsPromise = fetch("http://localhost:8000/insights", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": "algo-x-demo-key-2025",
-        },
-        body: JSON.stringify({ username: debouncedUsername.trim() }),
+        headers,
+        body: JSON.stringify({ username: trimmedUsername }),
+      }).then(res => res.json()).catch(() => ({ insights: ["Analyzing your profile..."] }));
+
+      const analyzePromise = fetch("http://localhost:8000/analyze", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ username: trimmedUsername }),
       });
 
+      // Get insights quickly
+      const insightsData = await insightsPromise;
+      setInsights(insightsData.insights || ["Analyzing your profile..."]);
+
+      // Wait for main analysis
+      const response = await analyzePromise;
       if (!response.ok) {
         throw new Error(`Error: ${response.status}`);
       }
@@ -149,9 +220,16 @@ export default function Home() {
                 className={STYLES.button}
               >
                 {loading ? (
-                  <div className="flex items-center gap-4">
-                    <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-white font-semibold">Analyzing Your Profile...</span>
+                  <div className="flex flex-col items-center gap-3 w-full">
+                    <div className="flex items-center gap-4">
+                      <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-white font-semibold">Analyzing Your Profile</span>
+                    </div>
+                    {insights.length > 0 && (
+                      <div className="text-sm text-white/90 text-center transition-opacity duration-500 animate-pulse">
+                        {insights[currentInsightIndex]}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
@@ -188,13 +266,20 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-5">
-                  {results.topics.map((topic, index) => (
+                  {results.topics.map((topicItem, index) => (
                     <Badge
                       key={index}
                       variant="secondary"
                       className={STYLES.badge}
+                      style={{
+                        opacity: 0.4 + (topicItem.weight * 0.6)
+                      }}
+                      title={`Weight: ${(topicItem.weight * 100).toFixed(0)}%`}
                     >
-                      {topic}
+                      {topicItem.topic}
+                      <span className="ml-2 text-sm opacity-70">
+                        {(topicItem.weight * 100).toFixed(0)}%
+                      </span>
                     </Badge>
                   ))}
                 </div>
@@ -207,17 +292,118 @@ export default function Home() {
                   <div className="p-3 bg-gray-100 rounded-2xl">
                     <MessageSquare className="w-8 h-8 text-black" />
                   </div>
-                  Recommended Content
+                  Algorithm Adjustment Report
                 </CardTitle>
                 <CardDescription className={STYLES.cardDescription}>
-                  Personalized recommendations from the algorithm
+                  Technical analysis of how the algorithm will adjust for your profile
+                  <span className="ml-2 text-sm opacity-60">
+                    ({results.recommendations.tokens.reasoning_tokens} reasoning tokens, {results.recommendations.tokens.completion_tokens} completion tokens)
+                  </span>
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className={STYLES.recommendationsContent}>
-                  <p className={STYLES.recommendationsText}>
-                    {results.recommendations}
-                  </p>
+                <div className="space-y-8">
+                  {/* Analysis Process */}
+                  <div className="bg-blue-50 p-6 rounded-xl border border-blue-200">
+                    <h3 className="text-xl font-bold text-blue-900 mb-3">Analysis Process</h3>
+                    <p className="text-blue-800 leading-relaxed">{results.recommendations.report.analysis_process}</p>
+                  </div>
+
+                  {/* Signals Boosted */}
+                  <div className="bg-green-50 p-6 rounded-xl border border-green-200">
+                    <h3 className="text-xl font-bold text-green-900 mb-4">Signals Being Boosted</h3>
+                    <div className="space-y-3">
+                      {results.recommendations.report.signals_boosted.map((signal, idx) => (
+                        <div key={idx} className="bg-white p-4 rounded-lg border border-green-300">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="font-bold text-green-700 text-lg">{signal.name}</span>
+                            <Badge className="bg-green-600 text-white">{signal.adjustment}</Badge>
+                          </div>
+                          <p className="text-gray-700 text-sm">{signal.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Signals Reduced */}
+                  <div className="bg-red-50 p-6 rounded-xl border border-red-200">
+                    <h3 className="text-xl font-bold text-red-900 mb-4">Signals Being Reduced</h3>
+                    <div className="space-y-3">
+                      {results.recommendations.report.signals_reduced.map((signal, idx) => (
+                        <div key={idx} className="bg-white p-4 rounded-lg border border-red-300">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="font-bold text-red-700 text-lg">{signal.name}</span>
+                            <Badge className="bg-red-600 text-white">{signal.adjustment}</Badge>
+                          </div>
+                          <p className="text-gray-700 text-sm">{signal.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Feed Composition */}
+                  <div className="bg-purple-50 p-6 rounded-xl border border-purple-200">
+                    <h3 className="text-xl font-bold text-purple-900 mb-4">Feed Composition Changes</h3>
+                    <div className="grid md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <h4 className="font-semibold text-purple-800 mb-2">Increasing ↑</h4>
+                        <ul className="list-disc list-inside space-y-1 text-purple-700">
+                          {results.recommendations.report.feed_composition.increase.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-purple-800 mb-2">Decreasing ↓</h4>
+                        <ul className="list-disc list-inside space-y-1 text-purple-700">
+                          {results.recommendations.report.feed_composition.decrease.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-purple-300">
+                      <span className="font-semibold text-purple-800">Account Distribution: </span>
+                      <span className="text-purple-700">{results.recommendations.report.feed_composition.account_distribution}</span>
+                    </div>
+                  </div>
+
+                  {/* Quality Metrics */}
+                  <div className="bg-orange-50 p-6 rounded-xl border border-orange-200">
+                    <h3 className="text-xl font-bold text-orange-900 mb-4">Quality Metrics Applied</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-semibold text-orange-800 mb-2">Prioritized Signals</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {results.recommendations.report.quality_metrics.prioritized_signals.map((sig, idx) => (
+                            <Badge key={idx} className="bg-orange-200 text-orange-900">{sig}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-orange-800 mb-2">Spam Filters</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {results.recommendations.report.quality_metrics.spam_filters.map((filter, idx) => (
+                            <Badge key={idx} className="bg-orange-300 text-orange-900">{filter}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-orange-800 mb-2">Diversity Mechanisms</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {results.recommendations.report.quality_metrics.diversity_mechanisms.map((mech, idx) => (
+                            <Badge key={idx} className="bg-orange-400 text-white">{mech}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expected Outcome */}
+                  <div className="bg-gray-100 p-6 rounded-xl border border-gray-300">
+                    <h3 className="text-xl font-bold text-gray-900 mb-3">Expected Outcome</h3>
+                    <p className="text-gray-800 leading-relaxed text-lg">{results.recommendations.report.expected_outcome}</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
