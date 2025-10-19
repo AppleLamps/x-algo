@@ -2,8 +2,8 @@ import os
 import logging
 import time
 import asyncio
-from xai_sdk import AsyncClient
-from xai_sdk.chat import SearchParameters
+from xai_sdk import AsyncClient  # type: ignore
+from xai_sdk.tools import x_search, code_execution  # type: ignore
 from aiohttp import ClientError, ClientConnectorError
 
 logger = logging.getLogger(__name__)
@@ -62,29 +62,22 @@ class XAIService:
                 return cached_result
 
         try:
-            async with AsyncClient(api_key=self.api_key) as client:
-                # Create a chat session with search enabled
-                chat = await asyncio.wait_for(
-                    client.chat.create(
-                        model="grok-4-fast",
-                        search=SearchParameters(
-                            search_mode="on",
-                            sources=["x_source"]
-                        )
-                    ),
-                    timeout=30
-                )
+            client = AsyncClient(api_key=self.api_key)
+            chat = await client.chat.create(
+                model="grok-4-fast",
+                tools=[x_search()],
+            )
 
-                # Query for user's posts and interactions
-                query = f"Recent posts and interactions by @{username} on X, including topics they engage with"
-                await chat.append(user=query)
+            # Query for user's posts and interactions
+            query = f"Posts, replies, and media by or to @{username} on X from the past year, including topics they engage with, replies they make, and media they share"
+            await chat.append(user=query)
 
-                # Get the response
-                response = await asyncio.wait_for(chat.get_response(), timeout=30)
-                result = response.content
-                # Cache the result
-                self.cache[username] = (time.time(), result)
-                return result
+            # Get the response
+            response = await chat.get_response()
+            result = response.content
+            # Cache the result
+            self.cache[username] = (time.time(), result)
+            return result
         except ClientConnectorError as e:
             logger.error(f"Network connection error gathering context for {username}: {str(e)}")
             return f"Mock context for {username}: This is a placeholder response for testing purposes. In a real scenario, this would contain actual X search results."
@@ -122,21 +115,36 @@ class XAIService:
             5
         """
         try:
-            async with AsyncClient(api_key=self.api_key) as client:
-                chat = await asyncio.wait_for(client.chat.create(model="grok-4-fast"), timeout=30)
+            client = AsyncClient(api_key=self.api_key)
+            chat = await client.chat.create(model="grok-4-fast", tools=[code_execution()])
 
-                prompt = f"""
-                Based on the following information about a user's X activity, extract the top 5-10 main topics or interests they seem to have.
-                Return only a comma-separated list of topics, no other text.
+            prompt = f"""
+            Based on the following information about a user's X activity, extract the main topics or interests.
 
-                Context: {context}
-                """
-                await chat.append(user=prompt)
-                response = await asyncio.wait_for(chat.get_response(), timeout=30)
-                topics_str = response.content.strip()
-                # Split by comma and clean
+            Use the code_execution tool to analyze the context and calculate weights for each topic based on:
+            - Frequency: how often the topic appears
+            - Recency: how recent the mentions are (assume recent if mentioned in recent context)
+            - Engagement: indicators like likes, retweets, replies (infer from context)
+
+            Then, return the top 5-10 topics with their weights, ensuring diversity (no repetitive similar topics).
+
+            Return as a JSON list of objects: [{{"topic": "AI", "weight": 0.9}}, ...]
+
+            Context: {context}
+            """
+            await chat.append(user=prompt)
+            response = await chat.get_response()
+            topics_str = response.content.strip()
+            # Parse JSON
+            import json
+            try:
+                topics_data = json.loads(topics_str)
+                topics = [item['topic'] for item in topics_data[:10]]
+            except json.JSONDecodeError:
+                # Fallback to old method
                 topics = [t.strip() for t in topics_str.split(",") if t.strip()]
-                return topics[:10]  # Limit to 10
+                topics = topics[:10]
+            return topics
         except ClientConnectorError as e:
             logger.error(f"Network connection error analyzing context: {str(e)}")
             return ["AI", "Technology", "Space", "Innovation", "Future"]
@@ -176,26 +184,26 @@ class XAIService:
             True
         """
         try:
-            async with AsyncClient(api_key=self.api_key) as client:
-                chat = await asyncio.wait_for(client.chat.create(model="grok-code-fast-1"), timeout=30)
+            client = AsyncClient(api_key=self.api_key)
+            chat = await client.chat.create(model="grok-4-fast")
 
-                prompt = f"""
-                You are simulating Elon's X recommendation algorithm. Based on a user's interests in: {', '.join(topics)}
+            prompt = f"""
+            You are simulating Elon's X recommendation algorithm. Based on a user's interests in: {', '.join(topics)}
 
-                And their activity context: {context[:1000]}...  # Truncate for token limit
+            And their activity context: {context[:1000]}...  # Truncate for token limit
 
-                Generate a personalized recommendation summary as if the algorithm is suggesting posts.
-                Focus on:
-                - High-quality, engaging content
-                - Topics the user cares about
-                - Diverse but relevant suggestions
-                - Surface "banger" posts from smaller accounts
+            Generate a personalized recommendation summary as if the algorithm is suggesting posts.
+            Focus on:
+            - High-quality, engaging content
+            - Topics the user cares about
+            - Diverse but relevant suggestions (avoid repetitive or similar topics)
+            - Surface "banger" posts from smaller accounts
 
-                Return a natural language summary of recommended content, 2-3 paragraphs.
-                """
-                await chat.append(user=prompt)
-                response = await asyncio.wait_for(chat.get_response(), timeout=30)
-                return response.content
+            Return a natural language summary of recommended content, 2-3 paragraphs.
+            """
+            await chat.append(user=prompt)
+            response = await chat.get_response()
+            return response.content
         except ClientConnectorError as e:
             logger.error(f"Network connection error generating recommendations: {str(e)}")
             return f"Based on your interests in {', '.join(topics)}, we recommend exploring more content about these topics. This is a mock response for testing - in production, this would be generated by Grok's algorithm simulation."

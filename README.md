@@ -28,7 +28,7 @@ A web application that simulates Elon's X recommendation algorithm using xAI's G
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/AppleLamps/x-algo
    cd algo-x
    ```
 
@@ -158,6 +158,10 @@ npm run build
 - Input validation on both frontend and backend
 - CORS configured for local development
 - Rate limiting can be added for production
+
+## Author
+
+Apple Lamps - [X Profile](https://x.com/lamps_apple)
 
 ## Contributing
 
