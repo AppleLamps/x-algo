@@ -3,6 +3,7 @@ import logging
 import time
 import asyncio
 from xai_sdk import AsyncClient  # type: ignore
+from xai_sdk.chat import user  # type: ignore
 from xai_sdk.tools import x_search, code_execution  # type: ignore
 from aiohttp import ClientError, ClientConnectorError
 
@@ -63,17 +64,17 @@ class XAIService:
 
         try:
             client = AsyncClient(api_key=self.api_key)
-            chat = await client.chat.create(
+            chat = client.chat.create(
                 model="grok-4-fast",
                 tools=[x_search()],
             )
 
             # Query for user's posts and interactions
             query = f"Posts, replies, and media by or to @{username} on X from the past year, including topics they engage with, replies they make, and media they share"
-            await chat.append(user=query)
+            chat.append(user(query))
 
             # Get the response
-            response = await chat.get_response()
+            response = await chat.sample()
             result = response.content
             # Cache the result
             self.cache[username] = (time.time(), result)
@@ -116,7 +117,7 @@ class XAIService:
         """
         try:
             client = AsyncClient(api_key=self.api_key)
-            chat = await client.chat.create(model="grok-4-fast", tools=[code_execution()])
+            chat = client.chat.create(model="grok-4-fast", tools=[code_execution()])
 
             prompt = f"""
             Based on the following information about a user's X activity, extract the main topics or interests.
@@ -132,8 +133,8 @@ class XAIService:
 
             Context: {context}
             """
-            await chat.append(user=prompt)
-            response = await chat.get_response()
+            chat.append(user(prompt))
+            response = await chat.sample()
             topics_str = response.content.strip()
             # Parse JSON
             import json
@@ -185,7 +186,7 @@ class XAIService:
         """
         try:
             client = AsyncClient(api_key=self.api_key)
-            chat = await client.chat.create(model="grok-4-fast")
+            chat = client.chat.create(model="grok-4-fast")
 
             prompt = f"""
             You are simulating Elon's X recommendation algorithm. Based on a user's interests in: {', '.join(topics)}
@@ -201,8 +202,8 @@ class XAIService:
 
             Return a natural language summary of recommended content, 2-3 paragraphs.
             """
-            await chat.append(user=prompt)
-            response = await chat.get_response()
+            chat.append(user(prompt))
+            response = await chat.sample()
             return response.content
         except ClientConnectorError as e:
             logger.error(f"Network connection error generating recommendations: {str(e)}")
