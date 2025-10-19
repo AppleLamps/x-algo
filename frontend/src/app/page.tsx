@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,12 +49,41 @@ interface QualityMetrics {
   diversity_mechanisms: string[];
 }
 
+interface DiversityMetrics {
+  diversity_score: number;
+  topic_entropy: number;
+  filter_bubble_risk: string;
+  viewpoint_diversity: string;
+}
+
+interface OpposingViewpoints {
+  included: boolean;
+  topics_with_diversity: string[];
+  explanation: string;
+}
+
+interface TemporalAnalysis {
+  recency_bias: string;
+  temporal_mix_explanation: string;
+  content_freshness: string;
+}
+
+interface RecommendationExplanation {
+  signal_name: string;
+  why_this_recommendation: string;
+  expected_impact: string;
+}
+
 interface AlgorithmReport {
   analysis_process: string;
   signals_boosted: Signal[];
   signals_reduced: Signal[];
   feed_composition: FeedComposition;
   quality_metrics: QualityMetrics;
+  diversity_metrics: DiversityMetrics;
+  opposing_viewpoints: OpposingViewpoints;
+  temporal_analysis: TemporalAnalysis;
+  recommendation_explanations: RecommendationExplanation[];
   expected_outcome: string;
 }
 
@@ -69,6 +98,46 @@ interface AnalyzeResponse {
     };
   };
 }
+
+// Helper component for progress bar with dynamic width (using ref to avoid inline styles warning)
+const ProgressBar = ({ percentage, colorClass }: { percentage: number; colorClass: string }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.style.setProperty('--progress-width', `${percentage}%`);
+    }
+  }, [percentage]);
+
+  return (
+    <div ref={ref} className={`h-2 rounded-full transition-all progress-bar ${colorClass}`}></div>
+  );
+};
+
+// Helper component for weighted badge with dynamic opacity (using ref to avoid inline styles warning)
+const WeightedBadge = ({ topic, weight, className }: { topic: string; weight: number; className: string }) => {
+  const ref = React.useRef<HTMLSpanElement>(null);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.style.setProperty('--badge-opacity', String(0.4 + (weight * 0.6)));
+    }
+  }, [weight]);
+
+  return (
+    <Badge
+      ref={ref}
+      variant="secondary"
+      className={`${className} weighted-badge`}
+      title={`Weight: ${(weight * 100).toFixed(0)}%`}
+    >
+      {topic}
+      <span className="ml-2 text-sm opacity-70">
+        {(weight * 100).toFixed(0)}%
+      </span>
+    </Badge>
+  );
+};
 
 export default function Home() {
   const [username, setUsername] = useState("");
@@ -267,20 +336,12 @@ export default function Home() {
               <CardContent>
                 <div className="flex flex-wrap gap-5">
                   {results.topics.map((topicItem, index) => (
-                    <Badge
+                    <WeightedBadge
                       key={index}
-                      variant="secondary"
+                      topic={topicItem.topic}
+                      weight={topicItem.weight}
                       className={STYLES.badge}
-                      style={{
-                        opacity: 0.4 + (topicItem.weight * 0.6)
-                      }}
-                      title={`Weight: ${(topicItem.weight * 100).toFixed(0)}%`}
-                    >
-                      {topicItem.topic}
-                      <span className="ml-2 text-sm opacity-70">
-                        {(topicItem.weight * 100).toFixed(0)}%
-                      </span>
-                    </Badge>
+                    />
                   ))}
                 </div>
               </CardContent>
@@ -398,6 +459,120 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Diversity Score & Filter Bubble Risk */}
+                  <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-200">
+                    <h3 className="text-xl font-bold text-indigo-900 mb-4">🎯 Feed Diversity Assessment</h3>
+                    <div className="grid md:grid-cols-2 gap-6">
+                      <div className="bg-white p-4 rounded-lg border border-indigo-300">
+                        <div className="flex items-end gap-2 mb-2">
+                          <span className="text-3xl font-bold text-indigo-700">
+                            {results.recommendations.report.diversity_metrics.diversity_score.toFixed(0)}
+                          </span>
+                          <span className="text-indigo-600 font-semibold mb-1">/100</span>
+                        </div>
+                        <p className="text-sm text-indigo-800 font-semibold">Diversity Score</p>
+                        <p className="text-xs text-indigo-600 mt-2">Higher scores indicate more topic variety in your feed</p>
+
+                        {/* Visual progress bar - uses helper component */}
+                        <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
+                          <ProgressBar
+                            percentage={results.recommendations.report.diversity_metrics.diversity_score}
+                            colorClass={
+                              results.recommendations.report.diversity_metrics.diversity_score > 70 ? 'bg-green-500' :
+                                results.recommendations.report.diversity_metrics.diversity_score > 50 ? 'bg-yellow-500' :
+                                  'bg-red-500'
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-4 rounded-lg border border-indigo-300">
+                        <div className="mb-3">
+                          <p className="text-sm text-indigo-800 font-semibold mb-1">Filter Bubble Risk</p>
+                          <Badge className={`${results.recommendations.report.diversity_metrics.filter_bubble_risk === 'Low' ? 'bg-green-600' :
+                            results.recommendations.report.diversity_metrics.filter_bubble_risk === 'Moderate' ? 'bg-yellow-600' :
+                              'bg-red-600'
+                            } text-white text-sm py-2 px-3`}>
+                            {results.recommendations.report.diversity_metrics.filter_bubble_risk}
+                          </Badge>
+                          <p className="text-xs text-indigo-600 mt-2">Risk of algorithm creating an echo chamber</p>
+                        </div>
+                        <div className="text-sm text-indigo-700 mt-3 p-3 bg-indigo-100 rounded">
+                          <p className="font-semibold mb-1">Topic Entropy: {(results.recommendations.report.diversity_metrics.topic_entropy * 100).toFixed(0)}%</p>
+                          <p className="text-xs">Measures how spread out your interests are across different topics</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 bg-white p-4 rounded-lg border border-indigo-300">
+                      <p className="text-sm font-semibold text-indigo-900 mb-2">Viewpoint Diversity</p>
+                      <p className="text-indigo-700 text-sm leading-relaxed">{results.recommendations.report.diversity_metrics.viewpoint_diversity}</p>
+                    </div>
+                  </div>
+
+                  {/* Opposing Viewpoints */}
+                  {results.recommendations.report.opposing_viewpoints.included && (
+                    <div className="bg-emerald-50 p-6 rounded-xl border border-emerald-200">
+                      <h3 className="text-xl font-bold text-emerald-900 mb-4">🔄 Opposing Viewpoints Strategy</h3>
+                      <div className="space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-emerald-800 mb-2">Topics with Diverse Perspectives:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {results.recommendations.report.opposing_viewpoints.topics_with_diversity.map((topic, idx) => (
+                              <Badge key={idx} className="bg-emerald-200 text-emerald-900">{topic}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-white p-4 rounded-lg border border-emerald-300">
+                          <p className="text-emerald-700 text-sm leading-relaxed">{results.recommendations.report.opposing_viewpoints.explanation}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Temporal Analysis */}
+                  <div className="bg-sky-50 p-6 rounded-xl border border-sky-200">
+                    <h3 className="text-xl font-bold text-sky-900 mb-4">⏱️ Temporal Content Mix</h3>
+                    <div className="grid md:grid-cols-2 gap-4 mb-4">
+                      <div className="bg-white p-4 rounded-lg border border-sky-300">
+                        <p className="text-sm font-semibold text-sky-800 mb-2">Recency Bias</p>
+                        <p className="text-sky-700 font-semibold">{results.recommendations.report.temporal_analysis.recency_bias}</p>
+                        <p className="text-xs text-sky-600 mt-2">How recent vs. timeless your content is</p>
+                      </div>
+                      <div className="bg-white p-4 rounded-lg border border-sky-300">
+                        <p className="text-sm font-semibold text-sky-800 mb-2">Content Freshness</p>
+                        <p className="text-sky-700 font-semibold">{results.recommendations.report.temporal_analysis.content_freshness}</p>
+                        <p className="text-xs text-sky-600 mt-2">Distribution of recent vs. evergreen content</p>
+                      </div>
+                    </div>
+                    <div className="bg-white p-4 rounded-lg border border-sky-300">
+                      <p className="text-sky-700 text-sm leading-relaxed">{results.recommendations.report.temporal_analysis.temporal_mix_explanation}</p>
+                    </div>
+                  </div>
+
+                  {/* Why This Recommendation */}
+                  {results.recommendations.report.recommendation_explanations.length > 0 && (
+                    <div className="bg-fuchsia-50 p-6 rounded-xl border border-fuchsia-200">
+                      <h3 className="text-xl font-bold text-fuchsia-900 mb-4">💡 Why These Recommendations?</h3>
+                      <div className="space-y-3">
+                        {results.recommendations.report.recommendation_explanations.map((exp, idx) => (
+                          <div key={idx} className="bg-white p-4 rounded-lg border border-fuchsia-300">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1">
+                                <p className="font-semibold text-fuchsia-900 mb-1">{exp.signal_name}</p>
+                                <p className="text-fuchsia-700 text-sm mb-2">{exp.why_this_recommendation}</p>
+                                <div className="bg-fuchsia-100 p-3 rounded border border-fuchsia-200">
+                                  <p className="text-xs font-semibold text-fuchsia-800 mb-1">What you'll notice:</p>
+                                  <p className="text-xs text-fuchsia-700">{exp.expected_impact}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expected Outcome */}
                   <div className="bg-gray-100 p-6 rounded-xl border border-gray-300">

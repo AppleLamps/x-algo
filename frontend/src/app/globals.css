@@ -116,7 +116,21 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+
+  /* Dynamic width utility using CSS custom property */
+  .progress-bar {
+    width: var(--progress-width, 0%);
+  }
+
+  /* Dynamic opacity utility using CSS custom property */
+  .weighted-badge {
+    opacity: var(--badge-opacity, 1);
   }
 }

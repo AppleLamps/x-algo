@@ -40,6 +40,31 @@ class QualityMetrics(BaseModel):
     spam_filters: List[str] = Field(description="Spam/low-quality filters applied")
     diversity_mechanisms: List[str] = Field(description="Diversity mechanisms")
 
+class DiversityMetrics(BaseModel):
+    """Diversity and filter bubble risk metrics."""
+    diversity_score: float = Field(description="Feed diversity score (0-100%, higher=more diverse)", ge=0, le=100)
+    topic_entropy: float = Field(description="Topic entropy measure (0-1, higher=more varied)", ge=0, le=1)
+    filter_bubble_risk: str = Field(description="Risk level: 'Low', 'Moderate', or 'High'")
+    viewpoint_diversity: str = Field(description="Assessment of ideological/viewpoint spread in recommendations")
+
+class OpposingViewpoints(BaseModel):
+    """Opposing viewpoints included in recommendations."""
+    included: bool = Field(description="Whether opposing viewpoints are being included")
+    topics_with_diversity: List[str] = Field(description="Topics where opposing viewpoints will be shown")
+    explanation: str = Field(description="How opposing viewpoints improve the feed")
+
+class TemporalAnalysis(BaseModel):
+    """Temporal characteristics of recommendations."""
+    recency_bias: str = Field(description="Assessment: 'High (recent-focused)', 'Moderate (balanced)', or 'Low (evergreen-focused)'")
+    temporal_mix_explanation: str = Field(description="How recommendations balance recent vs. evergreen content")
+    content_freshness: str = Field(description="Percentage of recent content vs. timeless content")
+
+class RecommendationExplanation(BaseModel):
+    """Explanation for why a specific signal is being adjusted."""
+    signal_name: str = Field(description="Name of the signal being explained")
+    why_this_recommendation: str = Field(description="Why this adjustment benefits the user")
+    expected_impact: str = Field(description="What users will notice from this adjustment")
+
 class AlgorithmReport(BaseModel):
     """Complete algorithm adjustment report."""
     analysis_process: str = Field(description="Explanation of the analysis reasoning")
@@ -47,6 +72,10 @@ class AlgorithmReport(BaseModel):
     signals_reduced: List[Signal] = Field(description="Signals being reduced")
     feed_composition: FeedComposition = Field(description="Feed composition changes")
     quality_metrics: QualityMetrics = Field(description="Quality metrics applied")
+    diversity_metrics: DiversityMetrics = Field(description="Diversity and filter bubble risk assessment")
+    opposing_viewpoints: OpposingViewpoints = Field(description="Opposing viewpoints strategy")
+    temporal_analysis: TemporalAnalysis = Field(description="Temporal characteristics of recommendations")
+    recommendation_explanations: List[RecommendationExplanation] = Field(description="Why-this-recommendation explanations for key signals")
     expected_outcome: str = Field(description="Summary of expected feed changes")
 
 class RecommendationResponse(BaseModel):
@@ -369,11 +398,31 @@ class XAIService:
             - Note any spam/low-quality filters being applied
             - Mention diversity mechanisms to avoid echo chambers
             
+            ### Diversity & Filter Bubble Risk Analysis:
+            - Calculate a diversity_score (0-100) representing how diverse the personalized feed would be
+            - Assess topic_entropy (0-1) measuring variety in topic spread
+            - Evaluate filter_bubble_risk as "Low", "Moderate", or "High" - is this algorithm creating an echo chamber?
+            - Analyze viewpoint_diversity: Are opposing/diverse perspectives being included?
+            
+            ### Opposing Viewpoints Strategy:
+            - Determine if opposing viewpoints should be included (included: true/false)
+            - List specific topics where opposing viewpoints would be introduced
+            - Explain how this improves user understanding and prevents filter bubbles
+            
+            ### Temporal Analysis (Recency vs. Evergreen):
+            - Assess recency_bias: Is this "High (recent-focused)", "Moderate (balanced)", or "Low (evergreen-focused)"?
+            - Explain the temporal_mix: How are recent trending topics balanced with timeless evergreen content?
+            - Specify content_freshness as a percentage (e.g., "65% recent content, 35% timeless content")
+            
+            ### Why This Recommendation? (User-Facing Explanations):
+            - For 3-4 key signals being boosted, provide signal_name, why_this_recommendation (why users benefit), and expected_impact (what they'll notice)
+            - Make these explanations clear and non-technical for end users
+            
             ### Expected Outcome:
             - Briefly summarize the net effect on user's feed in 2-3 sentences
             - Acknowledge this is a simulation based on limited sample data
             
-            Use technical language. Be specific with metrics and percentages. Avoid conversational tone.
+            Use technical language for your analysis. Be specific with metrics and percentages. Avoid conversational tone.
             This should read like an internal engineering report, not a letter to the user.
             Show your analytical reasoning throughout.
             
@@ -383,6 +432,10 @@ class XAIService:
             - signals_reduced: List of signals being reduced (each with name, adjustment, reason)
             - feed_composition: Object with increase (list), decrease (list), account_distribution (string)
             - quality_metrics: Object with prioritized_signals (list), spam_filters (list), diversity_mechanisms (list)
+            - diversity_metrics: Object with diversity_score (0-100), topic_entropy (0-1), filter_bubble_risk ("Low"/"Moderate"/"High"), viewpoint_diversity (string)
+            - opposing_viewpoints: Object with included (boolean), topics_with_diversity (list of strings), explanation (string)
+            - temporal_analysis: Object with recency_bias ("High (recent-focused)"/"Moderate (balanced)"/"Low (evergreen-focused)"), temporal_mix_explanation (string), content_freshness (string)
+            - recommendation_explanations: List of objects, each with signal_name, why_this_recommendation, expected_impact
             - expected_outcome: Summary of net effect (string)
             """
             chat.append(user(prompt))

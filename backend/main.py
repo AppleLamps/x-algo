@@ -10,7 +10,13 @@ from xai_sdk import AsyncClient
 from xai_sdk.chat import SearchParameters
 import asyncio
 from aiohttp import ClientError, ClientConnectorError
-from services.xai_service import XAIService
+from services.xai_service import (
+    XAIService, 
+    DiversityMetrics, 
+    OpposingViewpoints, 
+    TemporalAnalysis,
+    RecommendationExplanation
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
