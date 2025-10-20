@@ -133,4 +133,9 @@
   .weighted-badge {
     opacity: var(--badge-opacity, 1);
   }
+
+  /* Dynamic width utility for confidence bar */
+  .confidence-bar {
+    width: var(--confidence-width, 0%);
+  }
 }

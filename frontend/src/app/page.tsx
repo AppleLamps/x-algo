@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,7 @@ const STYLES = {
   button: "w-full min-h-16 py-4 text-xl font-bold bg-black hover:bg-gray-800 text-white shadow-2xl hover:shadow-3xl transform hover:scale-[1.02] transition-all duration-300 rounded-2xl",
   errorCard: "mb-16 border border-red-300 bg-red-50 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500",
   resultsCard: "shadow-2xl border border-gray-200 bg-white hover:shadow-3xl transition-all duration-500",
-  badge: "px-6 py-4 text-lg font-bold bg-gray-100 text-black border border-gray-300 hover:shadow-xl hover:scale-105 transition-all duration-300 rounded-full",
+  badge: "px-6 py-4 text-lg font-semibold bg-gray-200 text-gray-900 border border-gray-400 hover:shadow-xl hover:scale-105 transition-all duration-300 rounded-full",
   recommendationsContent: "bg-gray-50 p-10 rounded-3xl border border-gray-300 shadow-inner",
   recommendationsText: "text-black whitespace-pre-wrap leading-relaxed text-2xl font-medium",
 } as const;
@@ -85,6 +85,7 @@ interface AlgorithmReport {
   temporal_analysis: TemporalAnalysis;
   recommendation_explanations: RecommendationExplanation[];
   expected_outcome: string;
+  profile_report: string; // NEW: detailed narrative report
 }
 
 interface AnalyzeResponse {
@@ -96,6 +97,42 @@ interface AnalyzeResponse {
       reasoning_tokens: number;
       total_tokens: number;
     };
+  };
+}
+
+interface PoliticalSpectrum {
+  position: string;
+  confidence: number;
+  reasoning: string;
+}
+
+interface PoliticalValueAlignment {
+  value_name: string;
+  stance: string;
+  evidence: string;
+}
+
+interface PoliticalAnalysisReport {
+  political_spectrum: PoliticalSpectrum;
+  key_political_topics: string[];
+  ideological_markers: string[];
+  value_alignments: PoliticalValueAlignment[];
+  engagement_level: string;
+  engagement_style: string;
+  primary_concerns: string[];
+  policy_interests: string[];
+  notable_positions: string[];
+  communication_tone: string;
+  analysis_summary: string;
+  disclaimer: string;
+}
+
+interface PoliticalAnalysisResponse {
+  report: PoliticalAnalysisReport;
+  tokens: {
+    completion_tokens: number;
+    reasoning_tokens: number;
+    total_tokens: number;
   };
 }
 
@@ -120,7 +157,9 @@ const WeightedBadge = ({ topic, weight, className }: { topic: string; weight: nu
 
   React.useEffect(() => {
     if (ref.current) {
-      ref.current.style.setProperty('--badge-opacity', String(0.4 + (weight * 0.6)));
+      // Ensure badges remain readable. Keep opacity between 0.85 and 1.0
+      const opacity = Math.min(1, Math.max(0.85, 0.85 + (weight * 0.15)));
+      ref.current.style.setProperty('--badge-opacity', String(opacity));
     }
   }, [weight]);
 
@@ -132,22 +171,49 @@ const WeightedBadge = ({ topic, weight, className }: { topic: string; weight: nu
       title={`Weight: ${(weight * 100).toFixed(0)}%`}
     >
       {topic}
-      <span className="ml-2 text-sm opacity-70">
+      <span className="ml-2 text-sm text-gray-700">
         {(weight * 100).toFixed(0)}%
       </span>
     </Badge>
   );
 };
 
+// Helper component for confidence bar with dynamic width (using ref to avoid inline styles warning)
+const ConfidenceBar = ({ confidence }: { confidence: number }) => {
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (ref.current) {
+      ref.current.style.setProperty('--confidence-width', `${confidence * 100}%`);
+    }
+  }, [confidence]);
+
+  return (
+    <div ref={ref} className="bg-gradient-to-r from-red-500 via-purple-500 to-blue-500 h-3 rounded-full transition-all confidence-bar"></div>
+  );
+};
+
 export default function Home() {
   const [username, setUsername] = useState("");
   const [debouncedUsername, setDebouncedUsername] = useState("");
+  const [lastAnalyzedUsername, setLastAnalyzedUsername] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState("");
   const [inputError, setInputError] = useState("");
   const [insights, setInsights] = useState<string[]>([]);
   const [currentInsightIndex, setCurrentInsightIndex] = useState(0);
+  const [politicalLoading, setPoliticalLoading] = useState(false);
+  const [politicalResults, setPoliticalResults] = useState<PoliticalAnalysisResponse | null>(null);
+  const [politicalError, setPoliticalError] = useState("");
+
+  // Validate environment variables on component mount
+  useEffect(() => {
+    if (!process.env.NEXT_PUBLIC_API_KEY) {
+      console.error('NEXT_PUBLIC_API_KEY environment variable is not set');
+      setError('Configuration error: API key not found. Please contact support.');
+    }
+  }, []);
 
   // Debounce username input
   useEffect(() => {
@@ -198,7 +264,7 @@ export default function Home() {
 
     try {
       const trimmedUsername = debouncedUsername.trim();
-      const apiKey = "algo-x-demo-key-2025";
+      const apiKey = process.env.NEXT_PUBLIC_API_KEY || "";
       const headers = {
         "Content-Type": "application/json",
         "X-API-Key": apiKey,
@@ -224,15 +290,93 @@ export default function Home() {
       // Wait for main analysis
       const response = await analyzePromise;
       if (!response.ok) {
-        throw new Error(`Error: ${response.status}`);
+        let errorMessage = `Request failed with status ${response.status}`;
+
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          // If response is not JSON, use status-based message
+          if (response.status === 401) {
+            errorMessage = "Authentication failed. Please check your API key.";
+          } else if (response.status === 429) {
+            errorMessage = "Rate limit exceeded. Please try again in a minute.";
+          } else if (response.status === 400) {
+            errorMessage = "Invalid username. Please check and try again.";
+          } else if (response.status >= 500) {
+            errorMessage = "Server error. Please try again later.";
+          }
+        }
+
+        throw new Error(errorMessage);
       }
 
       const data: AnalyzeResponse = await response.json();
       setResults(data);
+      setLastAnalyzedUsername(trimmedUsername);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
+      setError(errorMessage);
+      console.error("Analysis error:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePoliticalAnalysis = async () => {
+    const validationError = validateUsername(lastAnalyzedUsername || debouncedUsername);
+    if (validationError) {
+      setPoliticalError(validationError);
+      return;
+    }
+
+    setPoliticalLoading(true);
+    setPoliticalError("");
+    setPoliticalResults(null);
+
+    try {
+      const trimmedUsername = (lastAnalyzedUsername || debouncedUsername).trim();
+      const apiKey = process.env.NEXT_PUBLIC_API_KEY || "";
+      const headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      };
+
+      const response = await fetch("http://localhost:8000/political-analysis", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ username: trimmedUsername }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Request failed with status ${response.status}`;
+
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          if (response.status === 401) {
+            errorMessage = "Authentication failed. Please check your API key.";
+          } else if (response.status === 429) {
+            errorMessage = "Rate limit exceeded. Please try again in a minute.";
+          } else if (response.status === 400) {
+            errorMessage = "Invalid username. Please check and try again.";
+          } else if (response.status >= 500) {
+            errorMessage = "Server error. Please try again later.";
+          }
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const data: PoliticalAnalysisResponse = await response.json();
+      setPoliticalResults(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
+      setPoliticalError(errorMessage);
+      console.error("Political analysis error:", err);
+    } finally {
+      setPoliticalLoading(false);
     }
   };
 
@@ -283,30 +427,50 @@ export default function Home() {
                   </p>
                 )}
               </div>
-              <Button
-                type="submit"
-                disabled={loading || !debouncedUsername.trim() || !!inputError}
-                className={STYLES.button}
-              >
-                {loading ? (
-                  <div className="flex flex-col items-center gap-3 w-full">
-                    <div className="flex items-center gap-4">
-                      <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
-                      <span className="text-white font-semibold">Analyzing Your Profile</span>
-                    </div>
-                    {insights.length > 0 && (
-                      <div className="text-sm text-white/90 text-center transition-opacity duration-500 animate-pulse">
-                        {insights[currentInsightIndex]}
+              <div className="space-y-4">
+                <Button
+                  type="submit"
+                  disabled={loading || !debouncedUsername.trim() || !!inputError}
+                  className={STYLES.button}
+                >
+                  {loading ? (
+                    <div className="flex flex-col items-center gap-3 w-full">
+                      <div className="flex items-center gap-4">
+                        <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-white font-semibold">Analyzing Your Profile</span>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <TrendingUp className="w-7 h-7" />
-                    Analyze Profile
-                  </div>
-                )}
-              </Button>
+                      {insights.length > 0 && (
+                        <div className="text-sm text-white/90 text-center transition-opacity duration-500 animate-pulse">
+                          {insights[currentInsightIndex]}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="w-7 h-7" />
+                      Analyze Profile
+                    </div>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handlePoliticalAnalysis}
+                  disabled={politicalLoading || !debouncedUsername.trim() || !!inputError}
+                  className="w-full min-h-16 py-4 text-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-2xl hover:shadow-3xl transform hover:scale-[1.02] transition-all duration-300 rounded-2xl"
+                >
+                  {politicalLoading ? (
+                    <div className="flex items-center gap-3 w-full justify-center">
+                      <div className="w-7 h-7 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span className="text-white font-semibold">Analyzing Political Profile</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <MessageSquare className="w-7 h-7" />
+                      Check Your Political Insights
+                    </div>
+                  )}
+                </Button>
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -319,6 +483,14 @@ export default function Home() {
           </Card>
         )}
 
+        {politicalError && (
+          <Card className={STYLES.errorCard}>
+            <CardContent className="pt-10 pb-10">
+              <p className="text-red-800 font-bold text-xl">{politicalError}</p>
+            </CardContent>
+          </Card>
+        )}
+
         {results && (
           <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
             <Card className={STYLES.resultsCard}>
@@ -327,10 +499,10 @@ export default function Home() {
                   <div className="p-3 bg-gray-100 rounded-2xl">
                     <TrendingUp className="w-8 h-8 text-black" />
                   </div>
-                  Your Interests
+                  {`${lastAnalyzedUsername || debouncedUsername || "Your"}'s Interests`}
                 </CardTitle>
                 <CardDescription className={STYLES.cardDescription}>
-                  Topics we&apos;ve identified from your X activity
+                  {`Topics we\'ve identified from ${lastAnalyzedUsername || debouncedUsername || "your"}\'s X activity`}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -563,7 +735,7 @@ export default function Home() {
                                 <p className="font-semibold text-fuchsia-900 mb-1">{exp.signal_name}</p>
                                 <p className="text-fuchsia-700 text-sm mb-2">{exp.why_this_recommendation}</p>
                                 <div className="bg-fuchsia-100 p-3 rounded border border-fuchsia-200">
-                                  <p className="text-xs font-semibold text-fuchsia-800 mb-1">What you'll notice:</p>
+                                  <p className="text-xs font-semibold text-fuchsia-800 mb-1">What you&apos;ll notice:</p>
                                   <p className="text-xs text-fuchsia-700">{exp.expected_impact}</p>
                                 </div>
                               </div>
@@ -578,6 +750,222 @@ export default function Home() {
                   <div className="bg-gray-100 p-6 rounded-xl border border-gray-300">
                     <h3 className="text-xl font-bold text-gray-900 mb-3">Expected Outcome</h3>
                     <p className="text-gray-800 leading-relaxed text-lg">{results.recommendations.report.expected_outcome}</p>
+                  </div>
+
+                  {/* Detailed Profile Report */}
+                  <div className="bg-teal-50 p-6 rounded-xl border border-teal-200">
+                    <h3 className="text-xl font-bold text-teal-900 mb-3">🧭 Detailed Profile Report</h3>
+                    <div className="text-teal-800 text-lg leading-relaxed space-y-4">
+                      {(() => {
+                        const text = results.recommendations.report.profile_report || "";
+                        // Split by double newlines for paragraphs, fallback to single display
+                        const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+                        if (paragraphs.length > 1) {
+                          return paragraphs.map((para, idx) => (
+                            <p key={idx} className="whitespace-pre-wrap">{para}</p>
+                          ));
+                        }
+                        // If no paragraph breaks, display as single block with preserved line breaks
+                        return <p className="whitespace-pre-wrap">{text}</p>;
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {politicalResults && (
+          <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <Card className={STYLES.resultsCard}>
+              <CardHeader className={STYLES.cardHeader}>
+                <CardTitle className={STYLES.cardTitle}>
+                  <div className="p-3 bg-gradient-to-r from-purple-100 to-indigo-100 rounded-2xl">
+                    <MessageSquare className="w-8 h-8 text-purple-700" />
+                  </div>
+                  {`${lastAnalyzedUsername || debouncedUsername || "Your"}'s Political Profile`}
+                </CardTitle>
+                <CardDescription className={STYLES.cardDescription}>
+                  Political analysis based on X activity patterns and engagement
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-8">
+                  {/* Political Spectrum */}
+                  <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-xl border border-purple-200">
+                    <h3 className="text-xl font-bold text-purple-900 mb-6">📊 Political Spectrum Position</h3>
+                    <div className="space-y-4">
+                      <div className="bg-white p-6 rounded-lg border border-purple-300">
+                        <div className="flex items-center justify-between mb-4">
+                          <span className="text-2xl font-bold text-purple-700">
+                            {politicalResults.report.political_spectrum.position}
+                          </span>
+                          <Badge className="bg-purple-600 text-white text-lg py-2 px-4">
+                            {(politicalResults.report.political_spectrum.confidence * 100).toFixed(0)}% Confidence
+                          </Badge>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
+                          <ConfidenceBar confidence={politicalResults.report.political_spectrum.confidence} />
+                        </div>
+                        <p className="text-purple-700 leading-relaxed">
+                          {politicalResults.report.political_spectrum.reasoning}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Key Political Topics */}
+                  <div className="bg-blue-50 p-6 rounded-xl border border-blue-200">
+                    <h3 className="text-xl font-bold text-blue-900 mb-4">🎯 Key Political Topics</h3>
+                    <div className="flex flex-wrap gap-3">
+                      {politicalResults.report.key_political_topics.map((topic, idx) => (
+                        <Badge key={idx} className="bg-blue-200 text-blue-900 text-base py-2 px-4">
+                          {topic}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Ideological Markers */}
+                  <div className="bg-indigo-50 p-6 rounded-xl border border-indigo-200">
+                    <h3 className="text-xl font-bold text-indigo-900 mb-4">🏛️ Ideological Markers</h3>
+                    <div className="flex flex-wrap gap-3">
+                      {politicalResults.report.ideological_markers.map((marker, idx) => (
+                        <Badge key={idx} className="bg-indigo-200 text-indigo-900 text-base py-2 px-4">
+                          {marker}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Value Alignments */}
+                  {politicalResults.report.value_alignments && politicalResults.report.value_alignments.length > 0 && (
+                    <div className="bg-violet-50 p-6 rounded-xl border border-violet-200">
+                      <h3 className="text-xl font-bold text-violet-900 mb-4">⚖️ Political Value Alignments</h3>
+                      <div className="space-y-4">
+                        {politicalResults.report.value_alignments.map((alignment, idx) => (
+                          <div key={idx} className="bg-white p-4 rounded-lg border border-violet-300">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-bold text-violet-900">{alignment.value_name}</span>
+                              <Badge className={`${alignment.stance.includes('Strongly Support') ? 'bg-green-600' :
+                                alignment.stance.includes('Support') ? 'bg-green-400' :
+                                  alignment.stance.includes('Neutral') ? 'bg-gray-400' :
+                                    alignment.stance.includes('Oppose') ? 'bg-red-400' :
+                                      alignment.stance.includes('Strongly Oppose') ? 'bg-red-600' :
+                                        'bg-yellow-400'
+                                } text-white`}>
+                                {alignment.stance}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-violet-700">{alignment.evidence}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Engagement Level & Style */}
+                  <div className="bg-orange-50 p-6 rounded-xl border border-orange-200">
+                    <h3 className="text-xl font-bold text-orange-900 mb-4">⚡ Political Engagement</h3>
+                    <div className="space-y-3">
+                      <div className="bg-white p-4 rounded-lg border border-orange-300">
+                        <p className="text-sm font-semibold text-orange-600 mb-1">Engagement Level</p>
+                        <p className="text-2xl font-bold text-orange-700">
+                          {politicalResults.report.engagement_level}
+                        </p>
+                      </div>
+                      {politicalResults.report.engagement_style && (
+                        <div className="bg-white p-4 rounded-lg border border-orange-300">
+                          <p className="text-sm font-semibold text-orange-600 mb-1">Engagement Style</p>
+                          <p className="text-xl font-bold text-orange-700">
+                            {politicalResults.report.engagement_style}
+                          </p>
+                        </div>
+                      )}
+                      {politicalResults.report.communication_tone && (
+                        <div className="bg-white p-4 rounded-lg border border-orange-300">
+                          <p className="text-sm font-semibold text-orange-600 mb-1">Communication Tone</p>
+                          <p className="text-xl font-bold text-orange-700">
+                            {politicalResults.report.communication_tone}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Primary Concerns */}
+                  <div className="bg-red-50 p-6 rounded-xl border border-red-200">
+                    <h3 className="text-xl font-bold text-red-900 mb-4">❤️ Primary Political Concerns</h3>
+                    <ul className="space-y-2">
+                      {politicalResults.report.primary_concerns.map((concern, idx) => (
+                        <li key={idx} className="flex items-start gap-3 text-red-800">
+                          <span className="text-red-600 font-bold mt-1">•</span>
+                          <span>{concern}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Policy Interests */}
+                  <div className="bg-green-50 p-6 rounded-xl border border-green-200">
+                    <h3 className="text-xl font-bold text-green-900 mb-4">📋 Policy Interests</h3>
+                    <ul className="space-y-2">
+                      {politicalResults.report.policy_interests.map((policy, idx) => (
+                        <li key={idx} className="flex items-start gap-3 text-green-800">
+                          <span className="text-green-600 font-bold mt-1">•</span>
+                          <span>{policy}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Notable Positions */}
+                  {politicalResults.report.notable_positions && politicalResults.report.notable_positions.length > 0 && (
+                    <div className="bg-amber-50 p-6 rounded-xl border border-amber-200">
+                      <h3 className="text-xl font-bold text-amber-900 mb-4">💡 Notable Positions</h3>
+                      <div className="space-y-3">
+                        {politicalResults.report.notable_positions.map((position, idx) => (
+                          <div key={idx} className="bg-white p-4 rounded-lg border border-amber-300">
+                            <p className="text-amber-800 leading-relaxed">{position}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Analysis Summary */}
+                  <div className="bg-gray-100 p-6 rounded-xl border border-gray-300">
+                    <h3 className="text-xl font-bold text-gray-900 mb-4">📝 Analysis Summary</h3>
+                    <div className="text-gray-800 leading-relaxed space-y-4">
+                      {(() => {
+                        const text = politicalResults.report.analysis_summary || "";
+                        // Split by double newlines for paragraphs
+                        const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean);
+                        if (paragraphs.length > 1) {
+                          return paragraphs.map((para, idx) => (
+                            <p key={idx} className="text-lg whitespace-pre-wrap">{para}</p>
+                          ));
+                        }
+                        // If no paragraph breaks, display as single block with preserved formatting
+                        return <p className="text-lg whitespace-pre-wrap">{text}</p>;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Disclaimer */}
+                  <div className="bg-yellow-50 p-6 rounded-xl border-2 border-yellow-300">
+                    <h3 className="text-lg font-bold text-yellow-900 mb-3">⚠️ Important Disclaimer</h3>
+                    <p className="text-yellow-800 leading-relaxed">
+                      {politicalResults.report.disclaimer}
+                    </p>
+                  </div>
+
+                  {/* Token Usage */}
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-300 text-center">
+                    <p className="text-sm text-gray-600">
+                      Analysis used {politicalResults.tokens.reasoning_tokens} reasoning tokens and {politicalResults.tokens.completion_tokens} completion tokens
+                    </p>
                   </div>
                 </div>
               </CardContent>
